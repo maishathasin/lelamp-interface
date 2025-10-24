@@ -83,7 +83,7 @@ export const Sidebar = ({ onFileUpload, onSimulationUpload }: SidebarProps) => {
             <rect x="85" y="140" width="30" height="10" rx="2" fill="currentColor" />
           </svg>
         </div>
-        
+
         {/* LeLamp Text */}
         <h1 className="text-sm tracking-wide text-muted-foreground">
           LeLamp
