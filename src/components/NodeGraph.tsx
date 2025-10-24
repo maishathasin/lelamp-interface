@@ -9,16 +9,69 @@ import ReactFlow, {
   type Connection,
   type Edge,
   type Node,
+  EdgeProps,
+  getBezierPath,
+  EdgeLabelRenderer,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { NodeCard } from "./nodes/NodeCard";
 import { Button } from "@/components/ui/button";
-import { Plus, Play, Square } from "lucide-react";
+import { Plus, Play, Square, X } from "lucide-react";
 import { useJointStore, type JointParameter, type TransitionOptions } from "@/store/useJointStore";
 import { toast } from "sonner";
 
 const nodeTypes = {
   customNode: (props: any) => <NodeCard {...props} id={props.id} />,
+};
+
+// Custom edge component with delete button
+const CustomEdge = ({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, style = {}, markerEnd, data }: EdgeProps) => {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    sourcePosition,
+    targetX,
+    targetY,
+    targetPosition,
+  });
+
+  return (
+    <>
+      <path
+        id={id}
+        style={style}
+        className="react-flow__edge-path"
+        d={edgePath}
+        markerEnd={markerEnd}
+      />
+      <EdgeLabelRenderer>
+        <div
+          style={{
+            position: 'absolute',
+            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            pointerEvents: 'all',
+          }}
+          className="group"
+        >
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 rounded-full bg-red-500/20 hover:bg-red-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+            onClick={(e) => {
+              e.stopPropagation();
+              data?.onDelete?.(id);
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      </EdgeLabelRenderer>
+    </>
+  );
+};
+
+const edgeTypes = {
+  custom: CustomEdge,
 };
 
 interface NodeData {
@@ -48,6 +101,7 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [mousePosition, setMousePosition] = useState<{ x: number; y: number } | null>(null);
   // Subscribe to store for live joint values
   const storeJointValues = useJointStore((s) => s.jointValues);
   const availableJointsStore = useJointStore((s) => s.availableJoints);
@@ -114,7 +168,7 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
   // Initialize node states in store and seed empty joint nodes
   useEffect(() => {
     if (!availableJointsStore || availableJointsStore.length === 0) return;
-    
+
     nodes.forEach((node) => {
       const existingState = getNodeState(node.id);
       if (!existingState && (node.data as any)?.type === 'joint') {
@@ -158,9 +212,23 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
   }, [getNodeState, setNodes]);
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
+    (params: Connection) => setEdges((eds) => addEdge({ ...params, type: 'custom' }, eds)),
     [setEdges]
   );
+
+  const onDeleteEdge = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) => eds.filter((edge) => edge.id !== edgeId));
+      toast.success("Connection removed");
+    },
+    [setEdges]
+  );
+
+  // Add onDelete prop to all edges
+  const edgesWithDelete = edges.map(edge => ({
+    ...edge,
+    data: { ...edge.data, onDelete: onDeleteEdge }
+  }));
 
   const handleNodeChange = useCallback((nodeId: string, newData: Partial<NodeData>) => {
     setNodes((nds) =>
@@ -180,7 +248,7 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
     );
   }, [setNodes, onJointChange]);
 
-  const addNode = useCallback((type: "joint" | "transition") => {
+  const addNode = useCallback((type: "joint" | "transition", position?: { x: number; y: number }) => {
     // Check if URDF is loaded by checking if there are available joints
     if (!availableJointsStore || availableJointsStore.length === 0) {
       toast.error("Please upload a URDF file first");
@@ -192,66 +260,67 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
       name,
       value: typeof storeJointValues[name] === 'number' ? (storeJointValues as any)[name] : 0,
     }));
+
+    // Use provided position or fallback to mouse position or default
+    const nodePosition = position || mousePosition || { x: 300, y: 200 };
+
     const newNode: Node<NodeData> = {
       id: `node-${timestamp}`,
       type: "customNode",
-      position: {
-        x: 300 + Math.random() * 200,
-        y: 200 + Math.random() * 150,
-      },
+      position: nodePosition,
       data:
         type === "joint"
           ? {
-              type: "joint",
-              joints: seededJoints,
-              onJointChange,
-            }
+            type: "joint",
+            joints: seededJoints,
+            onJointChange,
+          }
           : {
-              type: "transition",
-              transition: {
-                smooth: true,
-                smoothness: 50,
-              },
+            type: "transition",
+            transition: {
+              smooth: true,
+              smoothness: 50,
             },
+          },
     };
     setNodes((nds) => [...nds, newNode]);
-  }, [setNodes, onJointChange, availableJointsStore, storeJointValues]);
+  }, [setNodes, onJointChange, availableJointsStore, storeJointValues, mousePosition]);
 
   const runAnimation = useCallback(async () => {
     if (isAnimating) return;
-    
+
     // Find starting node (no incoming edges)
     const startNodes = nodes.filter(
       (node) => !edges.some((edge) => edge.target === node.id)
     );
-    
+
     if (startNodes.length === 0) {
       toast.error("No starting node found. Add a node without incoming connections.");
       return;
     }
-    
+
     const abortController = new AbortController();
     setAnimationAbortController(abortController);
     setIsAnimating(true);
-    
+
     try {
       let currentNodeId = startNodes[0].id;
       let previousJointPose: Record<string, number> | null = null;
       let skipNextJointApplication = false;
-      
+
       while (currentNodeId && !abortController.signal.aborted) {
         setActiveNodeId(currentNodeId);
         const currentNode = nodes.find((n) => n.id === currentNodeId);
         const nodeState = getNodeState(currentNodeId);
-        
+
         if (!currentNode || !nodeState) break;
-        
+
         if (nodeState.type === "joint" && nodeState.joints) {
           // Build current joint pose
           const pose = Object.fromEntries(
             nodeState.joints.map((j) => [j.name, j.value])
           );
-          
+
           // Only apply if we didn't just complete a smooth transition to this pose
           if (!skipNextJointApplication) {
             setStoreJointValues(pose);
@@ -262,15 +331,15 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
             // Still show this node briefly
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
-          
+
           previousJointPose = pose;
         } else if (nodeState.type === "transition" && nodeState.transition) {
           const trans = nodeState.transition;
-          
+
           // Find the next joint node to transition TO
           const nextEdge = edges.find((edge) => edge.source === currentNodeId);
           let nextJointPose: Record<string, number> | null = null;
-          
+
           if (nextEdge) {
             const nextNodeState = getNodeState(nextEdge.target);
             if (nextNodeState?.type === "joint" && nextNodeState.joints) {
@@ -279,44 +348,44 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
               );
             }
           }
-          
+
           if (trans.smooth && previousJointPose && nextJointPose) {
             // Smooth interpolation from previous joint to next joint
             // smoothness controls speed: 0 = slowest (5s), 100 = fastest (0.5s)
             const minDuration = 500; // 0.5 seconds
             const maxDuration = 5000; // 5 seconds
             const durationMs = maxDuration - (trans.smoothness / 100) * (maxDuration - minDuration);
-            
+
             const frameRate = 60; // 60 fps
             const frameTime = 1000 / frameRate;
             const totalFrames = Math.floor(durationMs / frameTime);
-            
+
             // Get all joint names
             const allJointNames = new Set([
               ...Object.keys(previousJointPose),
               ...Object.keys(nextJointPose)
             ]);
-            
+
             // Interpolate frame by frame
             for (let frame = 0; frame <= totalFrames && !abortController.signal.aborted; frame++) {
               const t = frame / totalFrames;
-              
+
               // Apply easing for smoother motion
               const easedT = t < 0.5
                 ? 2 * t * t
                 : 1 - Math.pow(-2 * t + 2, 2) / 2;
-              
+
               const interpolatedPose: Record<string, number> = {};
               allJointNames.forEach((jointName) => {
                 const startValue = previousJointPose![jointName] ?? 0;
                 const endValue = nextJointPose![jointName] ?? 0;
                 interpolatedPose[jointName] = startValue + (endValue - startValue) * easedT;
               });
-              
+
               setStoreJointValues(interpolatedPose);
               await new Promise((resolve) => setTimeout(resolve, frameTime));
             }
-            
+
             // Since we just smoothly transitioned to the next joint pose,
             // skip applying it again when we process the next joint node
             skipNextJointApplication = true;
@@ -325,7 +394,7 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
         }
-        
+
         // Find next node in the sequence
         const nextEdge = edges.find((edge) => edge.source === currentNodeId);
         currentNodeId = nextEdge ? nextEdge.target : "";
@@ -354,7 +423,7 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
           size="sm"
           variant="outline"
           className="text-xs bg-card shadow-md"
-          onClick={() => addNode("joint")}
+          onClick={() => addNode("joint", mousePosition || undefined)}
         >
           <Plus className="w-3 h-3 mr-1" />
           Joint
@@ -363,7 +432,7 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
           size="sm"
           variant="outline"
           className="text-xs bg-card shadow-md"
-          onClick={() => addNode("transition")}
+          onClick={() => addNode("transition", mousePosition || undefined)}
         >
           <Plus className="w-3 h-3 mr-1" />
           Transition
@@ -396,10 +465,18 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
 
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={edgesWithDelete}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onMouseMove={(event) => {
+          // Track mouse position for node placement
+          const rect = event.currentTarget.getBoundingClientRect();
+          setMousePosition({
+            x: event.clientX - rect.left,
+            y: event.clientY - rect.top
+          });
+        }}
         onNodeClick={(_, node) => {
           const prevFocused = focusedNodeId;
           setFocusedNodeId(node.id);
@@ -418,11 +495,12 @@ export const NodeGraph = ({ selectedJoint, onJointChange, jointValues, onSelectJ
           }
         }}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         fitView
         className="bg-background w-full h-full"
         style={{ width: "100%", height: "100%" }}
         defaultEdgeOptions={{
-          type: 'smoothstep',
+          type: 'custom',
           animated: false,
           style: { stroke: 'hsl(var(--border))', strokeWidth: 1.5 }
         }}
