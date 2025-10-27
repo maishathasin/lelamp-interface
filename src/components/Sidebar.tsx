@@ -75,22 +75,15 @@ export const Sidebar = ({ onFileUpload, onSimulationUpload }: SidebarProps) => {
   return (
     <div className="w-[250px] sidebar-panel flex flex-col p-6">
       <div className="flex flex-col items-start gap-6">
-        {/* Lamp Icon */}
-        <div className="w-8 h-8 text-muted-foreground">
-          <svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M100 40 L120 80 L80 80 Z" fill="currentColor" />
-            <rect x="95" y="80" width="10" height="60" fill="currentColor" />
-            <rect x="85" y="140" width="30" height="10" rx="2" fill="currentColor" />
-          </svg>
-        </div>
-        
+
+
         {/* LeLamp Text */}
         <h1 className="text-sm tracking-wide text-muted-foreground">
-          LeLamp
+          LeLamp Studio
         </h1>
 
         {/* Upload URDF */}
-        <div className="mt-8 flex flex-col gap-3">
+        <div className="mt-0 flex flex-col gap-3">
           <input
             type="file"
             id="simulation-zip-upload"

@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import JSZip from "jszip";
 import { MeshUploadZone } from "./MeshUploadZone";
 import { useJointStore } from "@/store/useJointStore";
+import type { Node, Edge } from "reactflow";
 
 interface Viewer3DProps {
   urdfFile: File | null;
@@ -19,6 +20,7 @@ interface Viewer3DProps {
   onJointSelect?: (jointName: string | null) => void;
   onJointChange?: (jointName: string, value: number) => void;
   onRobotJointsLoaded?: (joints: string[], angles: Record<string, number>) => void;
+  onCsvNodesGenerated?: (nodes: Node[], edges: Edge[]) => void;
 }
 
 interface MeshFiles {
@@ -38,18 +40,18 @@ interface URDFRobot {
   scale: THREE.Vector3;
 }
 
-const URDFModel = ({ 
-  file, 
+const URDFModel = ({
+  file,
   meshFiles,
-  animationFrames, 
-  isPlaying, 
+  animationFrames,
+  isPlaying,
   onRobotLoaded,
   selectedJoint,
   onSelectPart,
   onJointChange,
   onDragActiveChange,
-}: { 
-  file: File; 
+}: {
+  file: File;
   meshFiles: MeshFiles;
   animationFrames: AnimationFrame[] | null;
   isPlaying: boolean;
@@ -69,11 +71,11 @@ const URDFModel = ({
     if (!file) return;
 
     const loader = new URDFLoader();
-    
+
     // Custom mesh loader that uses the uploaded files
     loader.loadMeshCb = (path: string, manager: THREE.LoadingManager, onComplete: (mesh: THREE.Object3D | null, err?: Error) => void) => {
       console.log('Looking for mesh:', path);
-      
+
       // Try multiple path variations
       const filename = path.split('/').pop() || path;
       const pathVariations = [
@@ -84,7 +86,7 @@ const URDFModel = ({
         decodeURIComponent(path),                     // URL decoded
         decodeURIComponent(filename)                  // URL decoded filename
       ];
-      
+
       let meshBlob: Blob | null = null;
       for (const variant of pathVariations) {
         if (meshFiles[variant]) {
@@ -93,7 +95,7 @@ const URDFModel = ({
           break;
         }
       }
-      
+
       if (!meshBlob) {
         console.warn(`Mesh file not found. Tried:`, pathVariations);
         console.warn('Available meshes:', Object.keys(meshFiles));
@@ -104,7 +106,7 @@ const URDFModel = ({
 
       const blobUrl = URL.createObjectURL(meshBlob);
       blobUrlsRef.current.push(blobUrl);
-      
+
       const stlLoader = new STLLoader(manager);
       stlLoader.load(
         blobUrl,
@@ -113,14 +115,14 @@ const URDFModel = ({
             vertices: geometry.attributes.position.count,
             hasNormals: !!geometry.attributes.normal
           });
-          
+
           // Ensure geometry has normals
           if (!geometry.attributes.normal) {
             geometry.computeVertexNormals();
           }
-          
+
           // Create mesh with a visible material
-          const material = new THREE.MeshStandardMaterial({ 
+          const material = new THREE.MeshStandardMaterial({
             color: 0xcccccc,
             metalness: 0.3,
             roughness: 0.7,
@@ -129,7 +131,7 @@ const URDFModel = ({
           const mesh = new THREE.Mesh(geometry, material);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
-          
+
           console.log(`Created mesh for ${filename}`, mesh);
           onComplete(mesh);
         },
@@ -155,16 +157,16 @@ const URDFModel = ({
             groupRef.current.remove(groupRef.current.children[0]);
           }
           groupRef.current.add(robot);
-          
+
           console.log('Robot added to scene, children count:', robot.children.length);
           console.log('Robot structure:', robot);
-          
+
           // Keep URDF Z-up to match CSV axes; no rotation
 
           // Scale to fit within a 2-unit cube (optional) but KEEP anchor at origin
-          let box = new THREE.Box3().setFromObject(robot);
-          let size = box.getSize(new THREE.Vector3());
-          let maxDim = Math.max(size.x, size.y, size.z);
+          const box = new THREE.Box3().setFromObject(robot);
+          const size = box.getSize(new THREE.Vector3());
+          const maxDim = Math.max(size.x, size.y, size.z);
 
           console.log('Robot bounding box (pre-scale):', { size, maxDim, min: box.min, max: box.max });
 
@@ -200,10 +202,10 @@ const URDFModel = ({
 
           robotRef.current = robot;
           onRobotLoaded(robot);
-          
+
           const jointNames = Object.keys(robot.joints || {});
           console.log('Available joints:', jointNames);
-          
+
           toast.success(`Robot loaded with ${jointNames.length} joints`);
         }
       } catch (err) {
@@ -252,7 +254,7 @@ const URDFModel = ({
 
     const currentFrame = animationFrames[frameIndex];
     const nextFrame = animationFrames[Math.min(frameIndex + 1, animationFrames.length - 1)];
-    
+
     // Interpolate between frames
     const t = nextFrame.timestamp !== currentFrame.timestamp
       ? (currentTime - currentFrame.timestamp) / (nextFrame.timestamp - currentFrame.timestamp)
@@ -416,13 +418,13 @@ const PlaceholderLamp = () => {
         <cylinderGeometry args={[0.3, 0.3, 0.1, 32]} />
         <meshStandardMaterial color="#666666" />
       </mesh>
-      
+
       {/* Stand */}
       <mesh position={[0, 0.4, 0]}>
         <cylinderGeometry args={[0.05, 0.05, 0.6, 16]} />
         <meshStandardMaterial color="#888888" />
       </mesh>
-      
+
       {/* Lampshade */}
       <mesh position={[0, 0.8, 0]} rotation={[0, 0, 0]}>
         <coneGeometry args={[0.25, 0.3, 32]} />
@@ -432,14 +434,15 @@ const PlaceholderLamp = () => {
   );
 };
 
-export const Viewer3D = ({ 
-  urdfFile, 
+export const Viewer3D = ({
+  urdfFile,
   initialMeshFiles = {},
   selectedJoint = null,
   jointValues = {},
   onJointSelect,
   onJointChange,
-  onRobotJointsLoaded
+  onRobotJointsLoaded,
+  onCsvNodesGenerated
 }: Viewer3DProps) => {
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [animationFrames, setAnimationFrames] = useState<AnimationFrame[] | null>(null);
@@ -603,6 +606,10 @@ export const Viewer3D = ({
 
       setAnimationFrames(frames);
 
+      // Convert frames to nodes and pass to parent
+      const { nodes, edges } = convertCsvFramesToNodes(frames);
+      onCsvNodesGenerated?.(nodes, edges);
+
       // Apply first frame immediately to set robot to starting pose
       if (robot && frames.length > 0) {
         const firstFrame = frames[0].joints;
@@ -630,6 +637,63 @@ export const Viewer3D = ({
     reader.readAsText(file);
   };
 
+  // Convert CSV animation frames to nodes
+  const convertCsvFramesToNodes = (frames: AnimationFrame[]) => {
+    if (!frames || frames.length === 0) return { nodes: [], edges: [] };
+
+    const nodes: Node[] = [];
+    const edges: Edge[] = [];
+
+    // Create nodes for each keyframe
+    frames.forEach((frame, index) => {
+      const timestamp = frame.timestamp;
+      const joints = Object.entries(frame.joints).map(([name, value]) => ({
+        name,
+        value
+      }));
+
+      const node = {
+        id: `csv-keyframe-${index}`,
+        type: "customNode",
+        position: {
+          x: 100 + (index * 200), // Spread nodes horizontally
+          y: 100 + (index % 3) * 150 // Create rows of 3
+        },
+        data: {
+          type: "joint",
+          joints,
+          onJointChange,
+          onDelete: () => {
+            // Handle node deletion if needed
+          },
+          isCsvNode: true,
+          timestamp: timestamp,
+          frameIndex: index
+        }
+      };
+
+      nodes.push(node);
+
+      // Create edges between consecutive frames
+      if (index > 0) {
+        const edge = {
+          id: `csv-edge-${index - 1}-${index}`,
+          source: `csv-keyframe-${index - 1}`,
+          target: `csv-keyframe-${index}`,
+          type: "custom",
+          data: {
+            onDelete: () => {
+              // Handle edge deletion if needed
+            }
+          }
+        };
+        edges.push(edge);
+      }
+    });
+
+    return { nodes, edges };
+  };
+
   const handleRun = () => {
     if (!animationFrames || animationFrames.length === 0) {
       toast.error("Please upload a CSV file first");
@@ -644,7 +708,7 @@ export const Viewer3D = ({
   };
 
   return (
-    <div className="panel p-6 h-[360px] sm:h-[420px] lg:h-[480px] flex flex-col">
+    <div className="panel p-6 h-full flex flex-col">
       {/* Top Controls */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
@@ -688,10 +752,10 @@ export const Viewer3D = ({
           <directionalLight position={[5, 5, 5]} intensity={1} castShadow />
           <directionalLight position={[-5, 3, -5]} intensity={0.4} />
           <pointLight position={[0, 5, 0]} intensity={0.5} />
-          
+
           {urdfFile ? (
-            <URDFModel 
-              file={urdfFile} 
+            <URDFModel
+              file={urdfFile}
               meshFiles={meshFiles}
               animationFrames={animationFrames}
               isPlaying={isPlaying}
@@ -704,12 +768,12 @@ export const Viewer3D = ({
           ) : (
             <PlaceholderLamp />
           )}
-          
+
           {/* Axes helper (X=red, Y=green, Z=blue) */}
           <axesHelper args={[2]} />
-          <OrbitControls makeDefault enabled={!isDraggingJoint} target={[0,0,0]} />
+          <OrbitControls makeDefault enabled={!isDraggingJoint} target={[0, 0, 0]} />
         </Canvas>
-        
+
         {!urdfFile && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <span className="text-xs text-muted-foreground/60">Upload URDF to view model</span>
@@ -719,9 +783,9 @@ export const Viewer3D = ({
 
       {/* Bottom Controls */}
       <div className="flex items-center justify-center gap-3 mt-4">
-        <Button 
-          variant="outline" 
-          size="sm" 
+        <Button
+          variant="outline"
+          size="sm"
           className="text-xs px-6"
           onClick={() => {
             setIsPlaying(false);
@@ -732,8 +796,8 @@ export const Viewer3D = ({
         >
           Reset
         </Button>
-        <Button 
-          size="sm" 
+        <Button
+          size="sm"
           className="bg-primary text-primary-foreground text-xs px-6"
           onClick={handleRun}
           disabled={!urdfFile || !animationFrames}
