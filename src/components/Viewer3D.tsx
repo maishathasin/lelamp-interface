@@ -38,6 +38,128 @@ interface URDFRobot {
   scale: THREE.Vector3;
 }
 
+// Lamp Head Light Component - Attaches light to the lamp_head mesh
+const LampHeadLight = ({ robot }: { robot: any }) => {
+  const currentLEDState = useJointStore((state) => state.currentLEDState);
+  const lightRef = useRef<THREE.PointLight>(null);
+  const bulbRef = useRef<THREE.Mesh>(null);
+  const lampHeadRef = useRef<THREE.Object3D | null>(null);
+  
+  // ADJUST THIS NUMBER to move the light up/down to reach the lamp head
+  // Positive values move UP (towards lamp head), negative values move DOWN
+  const LIGHT_Z_OFFSET = 0.05; // Change this value to position the light correctly
+
+  // Find the lamp head link (last link in kinematic chain, highest point)
+  useEffect(() => {
+    if (!robot) return;
+    
+    let lampHeadLink: THREE.Object3D | null = null;
+    
+    // Log all available links and joints for debugging
+    const robotAny = robot as any;
+    if (robotAny.links) {
+      console.log('🔍 Available links:', Object.keys(robotAny.links));
+    }
+    if (robotAny.joints) {
+      console.log('🔍 Available joints:', Object.keys(robotAny.joints));
+    }
+    
+    // Strategy: Find the link/joint with the highest world Z position (lamp head is at top)
+    let highestZ = -Infinity;
+    let highestObject: THREE.Object3D | null = null;
+    
+    robot.traverse((obj: THREE.Object3D) => {
+      // Update world matrices to get accurate positions
+      obj.updateWorldMatrix(true, false);
+      const worldPos = new THREE.Vector3();
+      obj.getWorldPosition(worldPos);
+      
+      // Check if this object has a name suggesting it's a link or joint
+      const isLinkOrJoint = obj.name && (
+        obj.name.toLowerCase().includes('link') || 
+        obj.name.toLowerCase().includes('joint')
+      );
+      
+      if (isLinkOrJoint && worldPos.z > highestZ) {
+        highestZ = worldPos.z;
+        highestObject = obj;
+        console.log('🎯 Found higher object:', obj.name, 'at Z:', worldPos.z.toFixed(3));
+      }
+    });
+    
+    if (highestObject) {
+      lampHeadLink = highestObject;
+      console.log('✅ Selected lamp head link:', highestObject.name, 'at world Z:', highestZ.toFixed(3));
+    } else {
+      console.warn('⚠️ Could not find lamp head link');
+    }
+    
+    lampHeadRef.current = lampHeadLink;
+    
+    if (lampHeadLink && lightRef.current && bulbRef.current) {
+      // Attach light and bulb to lamp head
+      lampHeadLink.add(lightRef.current);
+      lampHeadLink.add(bulbRef.current);
+      console.log('✅ Attached light and bulb to lamp head:', lampHeadLink.name);
+    } else {
+      console.warn('⚠️ Could not attach light - lampHeadLink:', !!lampHeadLink, 'lightRef:', !!lightRef.current, 'bulbRef:', !!bulbRef.current);
+    }
+    
+    return () => {
+      if (lampHeadLink && lightRef.current) {
+        lampHeadLink.remove(lightRef.current);
+      }
+      if (lampHeadLink && bulbRef.current) {
+        lampHeadLink.remove(bulbRef.current);
+      }
+    };
+  }, [robot]);
+
+  useFrame(({ clock }) => {
+    if (!currentLEDState || !lightRef.current || !bulbRef.current) return;
+    
+    // Convert hex color to THREE.Color
+    const color = new THREE.Color(currentLEDState.color);
+    lightRef.current.color.copy(color);
+    
+    // Apply brightness with pulsing effect
+    const baseBrightness = currentLEDState.brightness / 100;
+    const pulse = Math.sin(clock.getElapsedTime() * 3) * 0.1;
+    const intensity = (baseBrightness + pulse * baseBrightness) * 5;
+    lightRef.current.intensity = Math.max(0, intensity);
+    
+    // Update bulb material
+    const bulbMaterial = bulbRef.current.material as THREE.MeshBasicMaterial;
+    bulbMaterial.color.copy(color);
+    bulbMaterial.opacity = Math.min(1, baseBrightness + 0.3);
+  });
+
+  if (!currentLEDState) {
+    return null;
+  }
+
+  return (
+    <>
+      {/* Point light at lamp head position */}
+      <pointLight 
+        ref={lightRef}
+        position={[0, 0, LIGHT_Z_OFFSET]}
+        distance={15}
+        decay={2}
+        castShadow
+      />
+      {/* Visible glowing bulb */}
+      <mesh ref={bulbRef} position={[0, 0, LIGHT_Z_OFFSET]}>
+        <sphereGeometry args={[0.03, 16, 16]} />
+        <meshBasicMaterial 
+          transparent 
+          opacity={0.9}
+        />
+      </mesh>
+    </>
+  );
+};
+
 const URDFModel = ({ 
   file, 
   meshFiles,
@@ -48,7 +170,7 @@ const URDFModel = ({
   onSelectPart,
   onJointChange,
   onDragActiveChange,
-}: { 
+}: {
   file: File; 
   meshFiles: MeshFiles;
   animationFrames: AnimationFrame[] | null;
@@ -684,23 +806,25 @@ export const Viewer3D = ({
             camera.up.set(0, 0, 1);
           }}
         >
-          <ambientLight intensity={0.7} />
-          <directionalLight position={[5, 5, 5]} intensity={1} castShadow />
-          <directionalLight position={[-5, 3, -5]} intensity={0.4} />
-          <pointLight position={[0, 5, 0]} intensity={0.5} />
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[5, 5, 5]} intensity={0.8} castShadow />
+          <directionalLight position={[-5, 3, -5]} intensity={0.3} />
           
           {urdfFile ? (
-            <URDFModel 
-              file={urdfFile} 
-              meshFiles={meshFiles}
-              animationFrames={animationFrames}
-              isPlaying={isPlaying}
-              onRobotLoaded={setRobot}
-              selectedJoint={selectedJoint}
-              onSelectPart={({ jointName }) => onJointSelect?.(jointName ?? null)}
-              onJointChange={(j, v) => { onJointChange?.(j, v); setStoreJointValue(j, v); }}
-              onDragActiveChange={setIsDraggingJoint}
-            />
+            <>
+              <URDFModel 
+                file={urdfFile} 
+                meshFiles={meshFiles}
+                animationFrames={animationFrames}
+                isPlaying={isPlaying}
+                onRobotLoaded={setRobot}
+                selectedJoint={selectedJoint}
+                onSelectPart={({ jointName }) => onJointSelect?.(jointName ?? null)}
+                onJointChange={(j, v) => { onJointChange?.(j, v); setStoreJointValue(j, v); }}
+                onDragActiveChange={setIsDraggingJoint}
+              />
+              {robot && <LampHeadLight robot={robot} />}
+            </>
           ) : (
             <PlaceholderLamp />
           )}

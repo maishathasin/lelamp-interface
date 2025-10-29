@@ -12,11 +12,17 @@ export interface TransitionOptions {
   smoothness: number; // Controls FPS and transition speed (0-100)
 }
 
+export interface LEDOptions {
+  color: string; // Hex color code
+  brightness: number; // 0-100
+}
+
 export interface NodeState {
   id: string;
-  type: "joint" | "transition";
+  type: "joint" | "transition" | "led" | "parallel";
   joints?: JointParameter[];
   transition?: TransitionOptions;
+  led?: LEDOptions;
 }
 
 interface JointStore {
@@ -24,7 +30,8 @@ interface JointStore {
   availableJoints: string[];
   nodeStates: Record<string, NodeState>;
   isAnimating: boolean;
-  activeNodeId: string | null;
+  activeNodeIds: string[];
+  currentLEDState: LEDOptions | null;
   setJointValue: (name: string, value: number) => void;
   setJointValues: (values: JointValues) => void;
   setAvailableJoints: (joints: string[]) => void;
@@ -32,8 +39,13 @@ interface JointStore {
   getNodeState: (nodeId: string) => NodeState | undefined;
   updateNodeJoints: (nodeId: string, joints: JointParameter[]) => void;
   updateNodeTransition: (nodeId: string, transition: TransitionOptions) => void;
+  updateNodeLED: (nodeId: string, led: LEDOptions) => void;
   setIsAnimating: (isAnimating: boolean) => void;
-  setActiveNodeId: (nodeId: string | null) => void;
+  setActiveNodeIds: (nodeIds: string[]) => void;
+  addActiveNodeId: (nodeId: string) => void;
+  removeActiveNodeId: (nodeId: string) => void;
+  clearActiveNodeIds: () => void;
+  setCurrentLEDState: (led: LEDOptions | null) => void;
 }
 
 export const useJointStore = create<JointStore>((set, get) => ({
@@ -41,7 +53,8 @@ export const useJointStore = create<JointStore>((set, get) => ({
   availableJoints: [],
   nodeStates: {},
   isAnimating: false,
-  activeNodeId: null,
+  activeNodeIds: [],
+  currentLEDState: null,
   setJointValue: (name, value) =>
     set((state) => ({
       jointValues: { ...state.jointValues, [name]: value },
@@ -75,6 +88,25 @@ export const useJointStore = create<JointStore>((set, get) => ({
         },
       };
     }),
+  updateNodeLED: (nodeId, led) =>
+    set((s) => {
+      const existing = s.nodeStates[nodeId];
+      if (!existing) return s;
+      return {
+        nodeStates: {
+          ...s.nodeStates,
+          [nodeId]: { ...existing, led },
+        },
+      };
+    }),
   setIsAnimating: (isAnimating) => set({ isAnimating }),
-  setActiveNodeId: (nodeId) => set({ activeNodeId: nodeId }),
+  setActiveNodeIds: (nodeIds) => set({ activeNodeIds: nodeIds }),
+  addActiveNodeId: (nodeId) => set((s) => ({ 
+    activeNodeIds: s.activeNodeIds.includes(nodeId) ? s.activeNodeIds : [...s.activeNodeIds, nodeId] 
+  })),
+  removeActiveNodeId: (nodeId) => set((s) => ({ 
+    activeNodeIds: s.activeNodeIds.filter(id => id !== nodeId) 
+  })),
+  clearActiveNodeIds: () => set({ activeNodeIds: [] }),
+  setCurrentLEDState: (led) => set({ currentLEDState: led }),
 }));

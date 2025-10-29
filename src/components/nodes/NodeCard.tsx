@@ -4,15 +4,16 @@ import { Slider } from "@/components/ui/slider";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
-import { useJointStore, type JointParameter, type TransitionOptions } from "@/store/useJointStore";
+import { useJointStore, type JointParameter, type TransitionOptions, type LEDOptions } from "@/store/useJointStore";
 import { X } from "lucide-react";
 
 interface NodeCardProps {
   id: string;
   data: {
-    type: "joint" | "transition";
+    type: "joint" | "transition" | "led" | "parallel";
     joints?: JointParameter[];
     transition?: TransitionOptions;
+    led?: LEDOptions;
     onJointChange?: (jointName: string, value: number) => void;
     jointValues?: Record<string, number>;
     selectedJoint?: string | null;
@@ -49,11 +50,12 @@ export const NodeCard = ({ id, data }: NodeCardProps) => {
   const setJointValueStore = useJointStore((s) => s.setJointValue);
   const updateNodeJoints = useJointStore((s) => s.updateNodeJoints);
   const updateNodeTransition = useJointStore((s) => s.updateNodeTransition);
+  const updateNodeLED = useJointStore((s) => s.updateNodeLED);
   const getNodeState = useJointStore((s) => s.getNodeState);
   const setNodeState = useJointStore((s) => s.setNodeState);
-  const activeNodeId = useJointStore((s) => s.activeNodeId);
+  const activeNodeIds = useJointStore((s) => s.activeNodeIds);
   const isAnimating = useJointStore((s) => s.isAnimating);
-  const isActive = activeNodeId === id;
+  const isActive = activeNodeIds.includes(id);
 
   // Initialize node state in store if not present
   useEffect(() => {
@@ -67,9 +69,13 @@ export const NodeCard = ({ id, data }: NodeCardProps) => {
           smooth: true,
           smoothness: 50,
         },
+        led: data.led || {
+          color: "#ff0000",
+          brightness: 100,
+        },
       });
     }
-  }, [id, data.type, data.joints, data.transition, getNodeState, setNodeState]);
+  }, [id, data.type, data.joints, data.transition, data.led, getNodeState, setNodeState]);
 
   // Get state from store
   const nodeState = getNodeState(id);
@@ -77,6 +83,10 @@ export const NodeCard = ({ id, data }: NodeCardProps) => {
   const localTransition = nodeState?.transition || data.transition || {
     smooth: true,
     smoothness: 50,
+  };
+  const localLED = nodeState?.led || data.led || {
+    color: "#ff0000",
+    brightness: 100,
   };
 
   // Sync external joint values into store (only when focused for live URDF updates)
@@ -173,6 +183,117 @@ export const NodeCard = ({ id, data }: NodeCardProps) => {
         </Button>
 
         <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-border" />
+      </div>
+    );
+  }
+
+  // LED node
+  if (data.type === "led") {
+    return (
+      <div className={`node-card min-w-[280px] max-w-[320px] relative transition-all ${data.isFocused ? 'ring-2 ring-primary/50' : ''} ${isActive ? 'ring-4 ring-primary shadow-lg shadow-primary/50 scale-105' : ''}`}>
+        <Handle type="target" position={Position.Left} className="w-2 h-2 !bg-border" />
+        
+        {data.onDelete && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="absolute -top-2 -right-2 h-5 w-5 p-0 rounded-full bg-destructive/10 hover:bg-destructive hover:text-destructive-foreground z-10"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onDelete?.();
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        )}
+        
+        <div className="mb-4">
+          <div className="text-xs text-muted-foreground/60 mb-3 uppercase tracking-wider">
+            LED
+          </div>
+          
+          <div className="space-y-4">
+            {/* Color Picker */}
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground">Color</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={localLED.color}
+                  onChange={(e) =>
+                    updateNodeLED(id, { ...localLED, color: e.target.value })
+                  }
+                  className="w-12 h-12 rounded cursor-pointer border border-border"
+                />
+                <span className="text-xs text-muted-foreground/60 font-mono">
+                  {localLED.color.toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            {/* Brightness Slider */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-muted-foreground">Brightness</label>
+                <span className="text-[10px] text-muted-foreground/60">
+                  {localLED.brightness}%
+                </span>
+              </div>
+              <Slider
+                value={[localLED.brightness]}
+                onValueChange={(value) =>
+                  updateNodeLED(id, { ...localLED, brightness: value[0] })
+                }
+                min={0}
+                max={100}
+                step={1}
+                className="w-full"
+              />
+            </div>
+          </div>
+        </div>
+
+        <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-border" />
+      </div>
+    );
+  }
+
+  // Parallel node
+  if (data.type === "parallel") {
+    return (
+      <div className={`node-card min-w-[280px] max-w-[320px] relative transition-all ${data.isFocused ? 'ring-2 ring-primary/50' : ''} ${isActive ? 'ring-4 ring-primary shadow-lg shadow-primary/50 scale-105' : ''}`}>
+        <Handle type="target" position={Position.Left} className="w-2 h-2 !bg-border" />
+        
+        {data.onDelete && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="absolute -top-2 -right-2 h-5 w-5 p-0 rounded-full bg-destructive/10 hover:bg-destructive hover:text-destructive-foreground z-10"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onDelete?.();
+            }}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        )}
+        
+        <div className="mb-4">
+          <div className="text-xs text-muted-foreground/60 mb-3 uppercase tracking-wider">
+            Parallel Branch
+          </div>
+          
+          <div className="space-y-2 text-xs text-muted-foreground">
+            <p>Executes multiple branches simultaneously.</p>
+            <p className="text-[10px] text-muted-foreground/60">
+              Connect LED and transition nodes to run them in parallel.
+            </p>
+          </div>
+        </div>
+
+        <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-border" id="a" style={{ top: '33%' }} />
+        <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-border" id="b" style={{ top: '50%' }} />
+        <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-border" id="c" style={{ top: '66%' }} />
       </div>
     );
   }

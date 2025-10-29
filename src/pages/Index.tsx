@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Viewer3D } from "@/components/Viewer3D";
 import { ModeTabs } from "@/components/ModeTabs";
 import { NodeGraph } from "@/components/NodeGraph";
+import JSZip from "jszip";
+import { toast } from "sonner";
 
 interface MeshFiles {
   [key: string]: Blob;
@@ -31,9 +33,52 @@ const Index = () => {
     }));
   };
 
+  // Auto-load simulation.zip on mount
+  useEffect(() => {
+    const loadSimulation = async () => {
+      try {
+        const response = await fetch('/simulation.zip');
+        const blob = await response.blob();
+        
+        const zip = new JSZip();
+        const contents = await zip.loadAsync(blob);
+        const meshFiles: MeshFiles = {};
+        let urdfFile: File | null = null;
+        let meshCount = 0;
+
+        for (const [filename, zipEntry] of Object.entries(contents.files)) {
+          if (zipEntry.dir) continue;
+
+          const fileBlob = await zipEntry.async('blob');
+          const name = filename.split('/').pop() || filename;
+
+          if (filename.endsWith('.urdf')) {
+            urdfFile = new File([fileBlob], name, { type: 'application/xml' });
+          } else if (filename.endsWith('.stl') || filename.endsWith('.dae') || filename.endsWith('.obj')) {
+            meshFiles[name] = fileBlob;
+            meshFiles[filename] = fileBlob;
+            meshFiles[filename.replace(/^[^/]*\//, '')] = fileBlob;
+            meshCount++;
+          }
+        }
+
+        if (urdfFile) {
+          setUrdfFile(urdfFile);
+          setMeshFiles(meshFiles);
+          toast.success(`Auto-loaded simulation: ${meshCount} meshes`);
+        }
+      } catch (error) {
+        console.error("Error auto-loading simulation:", error);
+        toast.error("Failed to auto-load simulation");
+      }
+    };
+
+    loadSimulation();
+  }, []);
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
-      <Sidebar onFileUpload={handleFileUpload} onSimulationUpload={handleSimulationUpload} />
+      {/* <Sidebar onFileUpload={handleFileUpload} onSimulationUpload={handleSimulationUpload} />*/}
       
       <main className="flex-1 flex flex-col p-6 overflow-hidden">
         {/* 3D Viewer */}
